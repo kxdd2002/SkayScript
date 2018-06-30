@@ -16,7 +16,7 @@ def readLine(fileName,handleLine,r=[],isShowLine=False):
 import re
 
 # 词法分析规则
-re_Pat = re.compile(r'\s*((//.*)|([0-9]+)|("(?:\\"|\\\\|\\n|[^"])*")|([a-z_A-Z][a-z_A-Z0-9]*)|(==|>=|<=|&&|\|\||[^A-Za-z0-9_]))?')
+re_Pat = re.compile(r'\s*((//.*)|([0-9]+)|("(?:\\"|\\\\|\\n|[^"])*")|([a-z_A-Z][a-z_A-Z0-9]*)|(==|\*\*|>=|<=|&&|\|\||[^A-Za-z0-9_]))?')
 
 # 词法分析
 def lexicalAnalysis(no,line,isShowLine=False):
@@ -198,16 +198,19 @@ class OP(P):
 		self.name = 'opt'
 		self.parser = parser
 		self.optList = optRules
-	def parse(self,reader,ps):
+	def parse(self,reader,ps,level=0):
 		# print('in .. ',self.ask(reader))
 		# print('pos',reader.cur)
 		while (self.ask(reader)):
+			optInfo = self.ask(reader)
+			if optInfo[0] < level:
+				break
 			# print('next .. ',ps)
 			self.doSwift(reader,ps)
 		# print('out .. ',ps)
 		# print('pos',reader.cur)
 	def askNextOpt(self,curInfo,nextInfo):
-		if curInfo[1]: # 此算法是否是向左运算的
+		if curInfo[1]: # 此算法是否是从左运算的
 			return curInfo[0] < nextInfo[0]
 		else:
 			return curInfo[0] <= nextInfo[0]
@@ -222,7 +225,7 @@ class OP(P):
 		# print('doSwift',s,optInfo,reader.seed(),nsInfo,(nsInfo and self.askNextOpt(optInfo,nsInfo)))
 		# print('pos',reader.cur)
 		if (nsInfo and self.askNextOpt(optInfo,nsInfo)):
-			self.parse(reader,rps)
+			self.parse(reader,rps,nsInfo[0])
 		ps.append(rps)
 	def ask(self,reader):
 		s = reader.seed()
@@ -262,6 +265,7 @@ class ParserRules2(object):
 		optRules['-'] = (1,True)
 		optRules['*'] = (2,True)
 		optRules['/'] = (2,True)
+		optRules['**'] = (3,False)
 		return optRules
 	def parse(self):
 		ps = []
@@ -326,6 +330,7 @@ class LangureRunner(object):
 			"-":lambda x,y:x-y,
 			"*":lambda x,y:x*y,
 			"/":lambda x,y:x/y,
+			"**":lambda x,y:x**y,
 		}
 	def optEval(self,ast,left):
 		if type(left)!=float and type(left)!=str and len(left) > 1:
@@ -341,9 +346,9 @@ class LangureRunner(object):
 		while len(ast) >= 3+nextPos:
 			right = self.optEval(ast[2+nextPos],right)
 			nextPos += 1
-		# print(opt,left,right)
+		print(opt,left,right)
 		r = self.optSwitch[opt](float(left),float(right))
-		# print('r',r)
+		print('r',r)
 		return r
 	def demo(self,h):
 		print(h)
@@ -372,7 +377,8 @@ def lexicaltest():
 # 语法分析测试
 def testParser():
 	# t = '3+5*(4+3)*2/3'
-	t = '123+234*(234-23423)*7/2'
+	# t = '123+234*(234-23423)*7/2'
+	t = '2*2**3**2+1'
 	# t = '(111)'
 	# t = '1+1'
 	lr = lexicalAnalysis(1,t)
