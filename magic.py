@@ -202,7 +202,7 @@ class OP(P):
 		# print('in .. ',self.ask(reader))
 		# print('pos',reader.cur)
 		while (self.ask(reader)):
-			print('next .. ',ps)
+			# print('next .. ',ps)
 			self.doSwift(reader,ps)
 		# print('out .. ',ps)
 		# print('pos',reader.cur)
@@ -219,8 +219,8 @@ class OP(P):
 		rps.append(s)
 		self.parser.parse(reader,rps)
 		nsInfo = self.ask(reader)
-		print('doSwift',s,optInfo,reader.seed(),nsInfo,(nsInfo and self.askNextOpt(optInfo,nsInfo)))
-		print('pos',reader.cur)
+		# print('doSwift',s,optInfo,reader.seed(),nsInfo,(nsInfo and self.askNextOpt(optInfo,nsInfo)))
+		# print('pos',reader.cur)
 		if (nsInfo and self.askNextOpt(optInfo,nsInfo)):
 			self.parse(reader,rps)
 		ps.append(rps)
@@ -336,14 +336,14 @@ class LangureRunner(object):
 			right = self.run(right)
 		else:
 			right = right[1]
-		print('pre right',right,ast[0],ast[1],len(ast))
+		# print('pre right',right,ast[0],ast[1],len(ast))
 		nextPos = 1
 		while len(ast) >= 3+nextPos:
 			right = self.optEval(ast[2+nextPos],right)
 			nextPos += 1
-		print(opt,left,right)
+		# print(opt,left,right)
 		r = self.optSwitch[opt](float(left),float(right))
-		print('r',r)
+		# print('r',r)
 		return r
 	def demo(self,h):
 		print(h)
@@ -371,7 +371,8 @@ def lexicaltest():
 
 # 语法分析测试
 def testParser():
-	t = '3+5*(4+3)*2/3'
+	# t = '3+5*(4+3)*2/3'
+	t = '123+234*(234-23423)*7/2'
 	# t = '(111)'
 	# t = '1+1'
 	lr = lexicalAnalysis(1,t)
@@ -380,7 +381,7 @@ def testParser():
 	gr = ParserRules2(r).parse()
 	showAST2(gr)
 	r = LangureRunner().run(gr)
-	print('===>',r)
+	print('>>>',r)
 
 def testRunner():
 	l = LangureRunner()
