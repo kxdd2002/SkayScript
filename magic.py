@@ -78,31 +78,17 @@ class P(object):
 		if self.tag:
 			ps.append(self.tag)
 		for p in self.args:
-			# print(self.tag,'all paser',p)
 			p.parse(reader,ps)
 		self.addTree(rps,ps)
 	def ask(self,reader):
 		p = self.args[0]
 		if p :
 			return p.ask(reader)
-	def tag(self,tag):
+	def setTag(self,tag):
 		self.tag = tag
 		return self
-	def last(self):
-		if len(self.args) > 0:
-			return self.args[len(self.args)-1]
-		return None
 	def which(self,parser):
-		if type(self)!=WhichParser:
-			whichP = WhichParser().tag(self.tag)
-			self.tag==None
-			whichP.__add__(self)
-			whichP.__add__(parser)
-			return whichP
-		elif type(self)==P:
-			return self + parser
-		else:
-			return (P(self.tag) + self) | parser
+		return WhichParser().add(self).add(parser) if type(self)!=WhichParser else self.add(parser)
 	def add(self,other):
 		self.args.append(other)
 		return self
@@ -111,7 +97,7 @@ class P(object):
 	def __add__(self,other):
 		return self.add(other)
 	def loop(self,onlyOne=False):
-		return LoopParser(self,onlyOne).tag(self.tag)
+		return LoopParser(self,onlyOne).setTag(self.tag)
 	def noCut(self):
 		if self.tag and not self.tag in noCutTreeTypes:
 			noCutTreeTypes.append(self.tag)
@@ -130,6 +116,7 @@ class P(object):
 class WhichParser(P):
 	def __init__(self):
 		self.args = []
+		self.tag = None
 	def parse(self,reader,rps):
 		ps = []
 		if self.tag:
@@ -162,10 +149,10 @@ class LoopParser(P):
 			self.parser.nextSeed()
 		return True
 class LeafParser(P):
-	def __init__(self,name,token=None):
+	def __init__(self,name,token=None,reserved = []):
 		self.name = name
 		self.token = token
-		self.reserved = []
+		self.reserved = reserved
 	def parse(self,reader,ps):
 		s = reader.read()
 		if self.name!='token':
@@ -178,27 +165,14 @@ class LeafParser(P):
 				return False
 			r = s[1]==self.name if (self.name!='token' and not self.token) else self.token==s[2]
 			return r
-class TP(LeafParser):
-	def __init__(self,token):
-		self.name = 'token'
-		self.token = token
-		self.reserved = []
-		return
-class NumP(LeafParser):
-	def __init__(self):
-		self.name = 'num'
-		self.token = None
-		self.reserved = []
-class StrP(LeafParser):
-	def __init__(self):
-		self.name = 'str'
-		self.token = None
-		self.reserved = []
-class IdP(LeafParser):
-	def __init__(self,token=None,reserved=[]):
-		self.name = 'id'
-		self.token = token
-		self.reserved = reserved
+def token(token):
+	return P()+LeafParser('token',token)
+def id(token=None,reserved=[]):
+	return P()+LeafParser('id',token,reserved)
+def word():
+	return P()+LeafParser('str')
+def num():
+	return P()+LeafParser('num')
 class OP(P):
 	def __init__(self,parser,optRules={}):
 		self.name = 'opt'
@@ -238,28 +212,20 @@ class OP(P):
 		if s and len(s)>2 and s[2] in self.optList:
 			return self.optList[s[2]]
 		return False
-def token(token):
-	return P()+TP(token)
-def id(token=None,reserved=[]):
-	return P()+IdP(token,reserved)
-def word():
-	return P()+StrP()
-def num():
-	return P()+NumP()
-def opt(parser,optRules={}):
-	return P()+OP(parser,optRules)
 
 # 语法分析规则1(自顶向下)
 # primary    : "(" exp ")" | NUMBER 
-# mul        : primary {("*"|"/") primary}
+# involution        : primary {"**" primary}
+# mul        : involution {("*"|"/") involution}
 # exp        : mul {("+"|"-") mul}
 class ParserRules(object):
 	def __init__(self,reader):
 		self.reader = reader
 		self.exp = P('exp')
 		self.primary = P('primary') + (token('(') + self.exp + token(')')) | num()
-		self.m = P('mul') + self.primary + ( (id('*')|id('/')) + self.primary ).loop()
-		self.exp = self.exp + self.m + ((id('+') | id('-')) + self.m ).loop()
+		self.involution = P('mul') + self.primary + ( id('**') + self.primary ).loop()
+		self.mul = P('mul') + self.involution + ( (id('*')|id('/')) + self.involution ).loop()
+		self.exp = self.exp + self.mul + ((id('+') | id('-')) + self.mul ).loop()
 	def parse(self):
 		ps = []
 		self.exp.parse(self.reader,ps)
@@ -274,7 +240,7 @@ class ParserRules2(object):
 		optRules = self.initOptRules()
 		self.exp = P('exp')
 		self.primary = P('primary') + (token('(') + self.exp + token(')')) | num()
-		self.exp = self.exp + self.primary + opt(self.primary,optRules)
+		self.exp = self.exp + self.primary + OP(self.primary,optRules)
 	def initOptRules(self):
 		optRules = {}
 		optRules['+'] = (1,True)
@@ -398,12 +364,12 @@ def lexicaltest():
 	r = []
 	readLine(f,lexicalAnalysis,r)
 	r.append((-1,'EOF',''))
+	print(r)
 
 	# reader = LexerReader(r)
-
 	# gr = ParserRules(reader).parse()
 	# showAST2(gr)
-	print(r)
+	
 	# print(reader.read())
 
 # 语法分析测试
