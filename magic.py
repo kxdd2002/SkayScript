@@ -73,8 +73,6 @@ class P(object):
 	def __init__(self,tag=None):
 		self.tag = tag
 		self.args = []
-		self.add = self.__add__
-		self.which = self.__or__
 	def parse(self,reader,rps):
 		ps = []
 		if self.tag:
@@ -94,7 +92,7 @@ class P(object):
 		if len(self.args) > 0:
 			return self.args[len(self.args)-1]
 		return None
-	def __or__(self,parser):
+	def which(self,parser):
 		if type(self)!=WhichParser:
 			whichP = WhichParser().tag(self.tag)
 			self.tag==None
@@ -105,9 +103,13 @@ class P(object):
 			return self + parser
 		else:
 			return (P(self.tag) + self) | parser
-	def __add__(self,other):
+	def add(self,other):
 		self.args.append(other)
 		return self
+	def __or__(self,parser):
+		return self.which(parser)
+	def __add__(self,other):
+		return self.add(other)
 	def loop(self,onlyOne=False):
 		return LoopParser(self,onlyOne).tag(self.tag)
 	def noCut(self):
@@ -271,8 +273,8 @@ class ParserRules2(object):
 		self.reader = reader
 		optRules = self.initOptRules()
 		self.exp = P('exp')
-		self.primary = P('primary') + ((token('(') + self.exp + token(')')) | num())
-		self.exp.impl = P('exp') + self.primary + opt(self.primary,optRules)
+		self.primary = P('primary') + (token('(') + self.exp + token(')')) | num()
+		self.exp = self.exp + self.primary + opt(self.primary,optRules)
 	def initOptRules(self):
 		optRules = {}
 		optRules['+'] = (1,True)
@@ -299,9 +301,18 @@ class ParserRules2(object):
 class ParserRules3(object):
 	def __init__(self,reader):
 		self.reader = reader
+		optRules = self.initOptRules()
 		self.exp = P('exp')
-		self.primary = P('primary').which(P().all(TP('('),self.exp,TP(')')),NumP())
-		self.exp.impl = P('exp').all(self.m,P().loop(P().all(P().which(IdP('+'),IdP('-')),self.m)))
+		self.primary = P('primary') + ((token('(') + self.exp + token(')')) | num())
+		self.exp = self.exp + self.primary + opt(self.primary,optRules)
+	def initOptRules(self):
+		optRules = {}
+		optRules['+'] = (1,True)
+		optRules['-'] = (1,True)
+		optRules['*'] = (2,True)
+		optRules['/'] = (2,True)
+		optRules['**'] = (3,False)
+		return optRules
 	def parse(self):
 		ps = []
 		self.exp.parse(self.reader,ps)
@@ -313,7 +324,7 @@ def showAST(ast):
 	result = json.dumps(ast,indent=4)
 	print(result)
 def showAST2(ast,lv=0):
-	print(ast)
+	# print(ast)
 	for t in ast:
 		if not t:
 			continue
@@ -332,6 +343,7 @@ class LangureRunner(object):
 		self.evals['demo'] = self.demo
 		self.optInit()
 	def run(self,ast):
+		# print('ast:',ast)
 		k = self.evals[ast[0]]
 		return k(ast)
 	def expEval(self,ast):
@@ -366,9 +378,9 @@ class LangureRunner(object):
 		while len(ast) >= 3+nextPos:
 			right = self.optEval(ast[2+nextPos],right)
 			nextPos += 1
-		print(opt,left,right)
+		# print(opt,left,right)
 		r = self.optSwitch[opt](float(left),float(right))
-		print('r',r)
+		# print('r',r)
 		return r
 	def demo(self,h):
 		print(h)
@@ -396,9 +408,9 @@ def lexicaltest():
 
 # 语法分析测试
 def testParser():
-	t = '3+5*(4+3)*2/3'
-	# t = '123+234*(234-23423)*7/2'
-	# t = '2*2**3**2+1'
+	# t = '3+5*(4+3)*2/3' # 26.333333333333332
+	# t = '123+234*(234-23423)*7/2' # -18991668.0
+	t = '2*2**3**2+1' # 1025.0
 	# t = '(111)'
 	# t = '1+1'
 	lr = lexicalAnalysis(1,t)
