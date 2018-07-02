@@ -72,26 +72,44 @@ noCutTreeTypes = []
 class P(object):
 	def __init__(self,tag=None):
 		self.tag = tag
-		self.impl = None
-	def parse(self,reader,ps):
-		if self.impl:
-			self.impl.parse(reader,ps)
-		else:
-			print('no psrse ....')
+		self.args = []
+		self.add = self.__add__
+		self.which = self.__or__
+	def parse(self,reader,rps):
+		ps = []
+		if self.tag:
+			ps.append(self.tag)
+		for p in self.args:
+			# print(self.tag,'all paser',p)
+			p.parse(reader,ps)
+		self.addTree(rps,ps)
 	def ask(self,reader):
-		if self.impl:
-			self.impl.ask(reader,ps)
-		else:
-			print('no ask ....')
+		p = self.args[0]
+		if p :
+			return p.ask(reader)
 	def tag(self,tag):
 		self.tag = tag
 		return self
-	def which(self,*args):
-		return WhichParser(args).tag(self.tag)
-	def all(self,*args):
-		return AndParser(args).tag(self.tag)
-	def loop(self,parser,onlyOne=False):
-		return LoopParser(parser,onlyOne).tag(self.tag)
+	def last(self):
+		if len(self.args) > 0:
+			return self.args[len(self.args)-1]
+		return None
+	def __or__(self,parser):
+		if type(self)!=WhichParser:
+			whichP = WhichParser().tag(self.tag)
+			self.tag==None
+			whichP.__add__(self)
+			whichP.__add__(parser)
+			return whichP
+		elif type(self)==P:
+			return self + parser
+		else:
+			return (P(self.tag) + self) | parser
+	def __add__(self,other):
+		self.args.append(other)
+		return self
+	def loop(self,onlyOne=False):
+		return LoopParser(self,onlyOne).tag(self.tag)
 	def noCut(self):
 		if self.tag and not self.tag in noCutTreeTypes:
 			noCutTreeTypes.append(self.tag)
@@ -107,24 +125,9 @@ class P(object):
 		else:
 			# print('+',self.tag,type(self),tree,'||',subTree,'???')
 			tree += subTree
-class AndParser(P):
-	def __init__(self,args):
-		self.args = args
-	def parse(self,reader,rps):
-		ps = []
-		if self.tag:
-			ps.append(self.tag)
-		for p in self.args:
-			# print(self.tag,'all paser',p)
-			p.parse(reader,ps)
-		self.addTree(rps,ps)
-	def ask(self,reader):
-		p = self.args[0]
-		if p :
-			return p.ask(reader)
 class WhichParser(P):
-	def __init__(self,args):
-		self.args = args
+	def __init__(self):
+		self.args = []
 	def parse(self,reader,rps):
 		ps = []
 		if self.tag:
@@ -178,6 +181,7 @@ class TP(LeafParser):
 		self.name = 'token'
 		self.token = token
 		self.reserved = []
+		return
 class NumP(LeafParser):
 	def __init__(self):
 		self.name = 'num'
@@ -232,6 +236,16 @@ class OP(P):
 		if s and len(s)>2 and s[2] in self.optList:
 			return self.optList[s[2]]
 		return False
+def token(token):
+	return P()+TP(token)
+def id(token=None,reserved=[]):
+	return P()+IdP(token,reserved)
+def word():
+	return P()+StrP()
+def num():
+	return P()+NumP()
+def opt(parser,optRules={}):
+	return P()+OP(parser,optRules)
 
 # 语法分析规则1(自顶向下)
 # primary    : "(" exp ")" | NUMBER 
@@ -241,9 +255,9 @@ class ParserRules(object):
 	def __init__(self,reader):
 		self.reader = reader
 		self.exp = P('exp')
-		self.primary = P('primary').which(P().all(TP('('),self.exp,TP(')')),NumP())
-		self.m = P('mul').all(self.primary,P().loop(P().all(P().which(IdP('*'),IdP('/')),self.primary)))
-		self.exp.impl = P('add').all(self.m,P().loop(P().all(P().which(IdP('+'),IdP('-')),self.m)))
+		self.primary = P('primary') + (token('(') + self.exp + token(')')) | num()
+		self.m = P('mul') + self.primary + ( (id('*')|id('/')) + self.primary ).loop()
+		self.exp = self.exp + self.m + ((id('+') | id('-')) + self.m ).loop()
 	def parse(self):
 		ps = []
 		self.exp.parse(self.reader,ps)
@@ -257,8 +271,8 @@ class ParserRules2(object):
 		self.reader = reader
 		optRules = self.initOptRules()
 		self.exp = P('exp')
-		self.primary = P('primary').which(P().all(TP('('),self.exp,TP(')')),NumP())
-		self.exp.impl = P('exp').all(self.primary,OP(self.primary,optRules))
+		self.primary = P('primary') + ((token('(') + self.exp + token(')')) | num())
+		self.exp.impl = P('exp') + self.primary + opt(self.primary,optRules)
 	def initOptRules(self):
 		optRules = {}
 		optRules['+'] = (1,True)
@@ -299,8 +313,11 @@ def showAST(ast):
 	result = json.dumps(ast,indent=4)
 	print(result)
 def showAST2(ast,lv=0):
+	print(ast)
 	for t in ast:
-		if type(t)==str or type(t)==int or type(t)==tuple:
+		if not t:
+			continue
+		if type(t)!=list:
 			print('- - '*lv+' '+str(t))
 		else:
 			showAST2(t,lv+1)
@@ -318,6 +335,9 @@ class LangureRunner(object):
 		k = self.evals[ast[0]]
 		return k(ast)
 	def expEval(self,ast):
+		if len(ast) < 2:
+			print('broken program ... exp broken ...',ast)
+			return
 		left = ast[1]
 		optNum = 1
 		while len(ast)>=optNum+2 :
@@ -376,9 +396,9 @@ def lexicaltest():
 
 # 语法分析测试
 def testParser():
-	# t = '3+5*(4+3)*2/3'
+	t = '3+5*(4+3)*2/3'
 	# t = '123+234*(234-23423)*7/2'
-	t = '2*2**3**2+1'
+	# t = '2*2**3**2+1'
 	# t = '(111)'
 	# t = '1+1'
 	lr = lexicalAnalysis(1,t)
