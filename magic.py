@@ -81,7 +81,11 @@ class LexerReader(object):
 # 非裁剪语法树分支名集合(全局)
 noCutTreeTypes = []
 # 是否显示分析树的合并日志
-showAddTreeLog = True
+showAddTreeLog = False
+showAskTreeLog = False
+def log(*arg):
+	if showAskTreeLog:
+		print(*arg)
 # 语法分析工具
 class P(object):
 	def __init__(self,tag=None):
@@ -91,9 +95,11 @@ class P(object):
 		ps = []
 		if self.tag:
 			ps.append(self.tag)
+		i = 0
 		for p in self.args:
-			print('next Parse ...',p,self.tag)
+			log('next Parse ...',i,len(self.args),p,self.tag,p.tag)
 			p.parse(reader,ps)
+			i += 1
 		self.addTree(rps,ps,reader)
 	def ask(self,reader):
 		p = self.args[0]
@@ -106,6 +112,8 @@ class P(object):
 		return WhichParser().add(self).add(parser) if type(self)!=WhichParser else self.add(parser)
 	def add(self,other):
 		self.args.append(other)
+		# if other and not other.tag:
+		# 	other.tag = str(self.tag) + '_' + str(len(self.args))
 		return self
 	def __or__(self,parser):
 		return self.which(parser)
@@ -140,6 +148,7 @@ class WhichParser(P):
 		if self.tag:
 			ps.append(self.tag)
 		p = self.ask(reader)
+		log('which Parse ...',p,self.tag,p.tag if p else None)
 		if p:
 			p.parse(reader,ps)
 		else:
@@ -160,34 +169,39 @@ class LoopParser(P):
 		ps = []
 		if self.tag:
 			ps.append(self.tag)
-		while (self.parser.ask(reader)):
+		hasNext = self.parser.ask(reader)
+		log('will loop Parse ...',hasNext,'||',self.parser,self.tag,self.parser.tag)
+		while hasNext:
+			log('has loop Parse ...',hasNext,'||',self.parser,self.tag,self.parser.tag)
 			self.parser.parse(reader,ps)
 			if self.onlyOne:
 				break
+			hasNext = self.parser.ask(reader)
 		self.addTree(rps,ps,reader)
 	def ask(self,reader):
 		# while (self.parser.ask(reader)):
 		# 	self.parser.nextSeed()
-		return self.parser.ask(reader)
+		return True
 class LeafParser(P):
 	def __init__(self,name,token=None,reserved = []):
 		self.name = name
 		self.token = token
 		self.reserved = reserved
+		self.tag = name+'_'+str(token)
 	def parse(self,reader,ps):
 		s = reader.read()
-		print(self.name,s,self.token,self.reserved)
+		log(self.name,s,self.token,self.reserved)
 		if self.name!='token' and self.name!='commit' and self.name!='EOL' and self.name!='EOF'  :
-			# print((self.name,s))
+			# log((self.name,s))
 			ps.append((self.name,s[2]))
 	def ask(self,reader):
 		s = reader.seed()
-		print('->ask leaf',s,self.name,self.token,self.reserved)
+		log('->ask leaf',s,self.name,self.token,self.reserved)
 		if s:
 			if (s and len(s)>2 and s[2] in self.reserved) and self.name == 'id':
 				return False
 			r = self.token==s[2] if self.token else s[1]==self.name
-			print('ask leaf',r,self.name,s,self.token,self.reserved)
+			log('ask leaf',r,self.name,s,self.token,self.reserved)
 			return r
 def token(token):
 	return P()+LeafParser('token',token)
@@ -206,6 +220,7 @@ class OP(P):
 		self.name = 'opt'
 		self.parser = parser
 		self.optList = optRules
+		self.tag = 'opt'
 	def parse(self,reader,ps,level=0):
 		# print('in .. ',self.ask(reader))
 		# print('pos',reader.cur)
@@ -302,13 +317,14 @@ class ParserRules3(object):
 		self.factor = P('factor') + (id('-')+self.primary)|self.primary
 		self.exp = self.exp + self.factor + OP(self.factor,optRules)
 		self.statement = P('statement')
-		self.block = P('block') + id('{') +self.statement.loop(True) + (  (id(';')|id('\n')) + self.statement.loop(True)  ).loop(True) +token('}')
+		self.block = P('block') + token('{') +self.statement.loop(True) + ( P()+ ( token(';')|EOL() )  + self.statement.loop(True)   ).loop()  +token('}')
 		self.simple = P('simple') + ( self.exp )
-		self.statement = self.statement + (  id('if') + self.exp + self.block + ( token('else') + self.block ).loop(True)  ) \
-										| (  id('while') + self.exp + self.block  ) \
-										| (  P() + self.simple + commit().loop(True)  )
+		self.statement = self.statement +(  (  id('if') + self.exp + self.block + ( token('else') + self.block ).loop(True)  ) \
+											| (  id('while') + self.exp + self.block  ) \
+											| ( self.simple + commit().loop(True) ) \
+											| commit() \
+										 )
 		self.program = P('program') + self.statement.loop(True) + ( token(';')|EOL() )
-		# self.lll = P('lll') +  ( token(';')|EOL() )
 	def initReserved(self):
 		reserved = [ ';' , '}' , '\n' ]
 		return reserved
@@ -344,6 +360,24 @@ def showAST2(ast,lv=0):
 			print('- - '*lv+' '+str(t))
 		else:
 			showAST2(t,lv+1)
+# 查看语法规则
+def showRule(rule,lv=0):
+	if lv > 3:
+		return
+	if type(rule) in { P, WhichParser,}:
+		print('- - '*lv+' '+str(rule.tag),'listParser' if type(rule)==P else 'wihchParser')
+		for p in rule.args:
+			showRule(p,lv+1)
+	elif type(rule) == LoopParser:
+		print('- - '*lv+' '+str(rule.tag),'LoopParser')
+		showRule(rule.parser,lv+1)
+	elif type(rule) == OP:
+		print('- - '*lv+' '+str(rule.tag),'OP')
+	elif type(rule) == LeafParser:
+		print('- - '*lv+' '+str(rule.tag),'LeafParser')
+	else:
+		print('unkown parser ...',rule)
+
 
 #  运行时环境对象
 class Env(object):
@@ -379,16 +413,52 @@ class LangureRunner(object):
 		self.evals['program'] = self.programEval
 		self.evals['exp'] = self.expEval
 		self.evals['opt'] = self.optEval
+		self.evals['statement'] = self.statementEval
+		self.evals['num'] = lambda ast,env:ast[1]
+		self.evals['str'] = lambda ast,env:ast[1]
+		self.evals['id'] = self.getValue
 		self.evals['demo'] = self.demo
 		self.optInit()
+	def getValue(self,ast,env):
+		# print('get ',ast[1])
+		r = env.get(ast[1])
+		# print('get ok :',ast[1],r)
+		return r
 	def run(self,ast,env=Env('runner')):
 		# print('ast:',ast)
+		# print('env:',env.v)
+		if type(ast) not in (list,tuple):
+			return None
 		k = self.evals[ast[0]]
 		return k(ast,env)
 	def programEval(self,ast,env):
 		ast = ast[1]
 		return self.run(ast,env)
+	def statementEval(self,ast,env):
+		# print('statementEval',ast)
+		if (type(ast) not in (list,tuple)) or len(ast) <=1:
+			return None
+		if ast[1] and type(ast[1]) in (list,tuple) and len(ast[1]) > 0 and ast[1][0]=='exp':
+			for exp in ast[1:]:
+				r = self.expEval(exp,env)
+		if ast[1] and type(ast[1]) in (list,tuple) and len(ast[1]) > 0:
+			if ast[1][0] == 'id' and ast[1][1] == 'while':
+				self.whileEval(ast[2],ast[3],env)
+			elif ast[1][0] == 'id' and ast[1][1] == 'if else':
+				self.ifEval(ast[2],ast[3],(ast[4] if len(ast) == 5 else None),env)
+	def whileEval(self,ifExp,blocks,env):
+		ifR = self.expEval(ifExp,env)
+		while ifR :
+			self.run(blocks,env)
+			ifR = self.expEval(ifExp,env)
+	def ifEval(self,ifExp,blocks,blocks2,env):
+		ifR = self.expEval(ifExp,env)
+		if ifR :
+			self.run(blocks,env)
+		elif blocks2:
+			self.run(blocks2,env)
 	def expEval(self,ast,env):
+		# print('expEval env:',env.v)
 		if len(ast) < 2:
 			print('broken program ... exp broken ...',ast)
 			return
@@ -414,21 +484,23 @@ class LangureRunner(object):
 			"=":lambda x,y,env:env.set(x,y),
 		}
 	def optEval(self,ast,left,env):
-		if not left :
+		# print('optEval',ast,left,env.v)
+		if (not left) and left != 0 :
+			# print('left is None')
 			return
-		if type(left)!=float and type(left)!=str and len(left) > 1:
-			left = left[1]
 		opt = ast[1][2]
-		right = ast[2]
-		if right[0] != 'num':
-			right = self.run(right)
-		else:
-			right = right[1]
+		if type(left)!=float and type(left)!=str and type(left)!=int and len(left) > 1:
+			left = left[1] if left[0] != 'id' or opt=='=' else self.run(left,env)
+		# right = ast[2]
+		# print('get right',ast[2])
+		right = self.run(ast[2],env)
+		# print('right end',right)
 		# print('pre right',right,ast[0],ast[1],len(ast))
 		nextPos = 1
 		while len(ast) >= 3+nextPos:
 			right = self.optEval(ast[2+nextPos],right,env)
 			nextPos += 1
+			# print('next right',right)
 		# print(opt,left,right)
 		r = self.optSwitch[opt](float(left),float(right),env) if opt in self.optSwitch else self.vSwitch[opt](left,right,env)
 		# print('r',r)
@@ -458,18 +530,26 @@ def testParser():
 	# t = '3+5*(4+3)*2/3' # 26.333333333333332
 	# t = '123+234*(234-23423)*7/2' # -18991668.0
 	# t = 'a = 2*2**3**2+1' # 1025.0
-	t = 'if (2>1) { b = 3-2-1 }'
+	# t = 'if (2>1) { b = 3-2-1 }'
+	t = 'sum = sum + i'
 	# t = '(111)'
 	# t = '1+1'
+	
 	lr = lexicalAnalysis(1,t)
 	print(lr)
 	r = LexerReader(lr)
-	gr = ParserRules3(r).parse()
+	g = ParserRules3(r)
+	gr = g.parse()
 	showAST2(gr)
-	# env = Env('runner')
-	# r = LangureRunner().run(gr,env)
-	# print('>>>',r)
-	# print('>>>env:',env.v)
+
+	# showRule(g.block)
+
+	env = Env('global')
+	env.set('i',3)
+	env.set('sum',0)
+	r = LangureRunner().run(gr,env)
+	print('>>>',r)
+	print('>>>env:',env.v)
 
 # 运行脚本测试
 def runScript(f = 'store.st'):
@@ -480,14 +560,15 @@ def runScript(f = 'store.st'):
 	print(r)
 	reader = LexerReader(r)
 	gr = True
-	# env = Env('global')
+	env = Env('global')
 	while ((not reader.isEnd()) and gr):
-		print('line: %d, pos: %d' % (reader.line(),reader.pos()))
+		print('line: %d' % reader.line())
+		# print('pos: %d' % reader.pos())
 		gr = ParserRules3(reader).parse()
 		showAST2(gr)
-		# r = LangureRunner().run(gr,env)
-		# print('>>>',r)
-	# print('>>>env:',env.v)
+		r = LangureRunner().run(gr,env)
+		print('>>>',r)
+	print('>>>env:',env.v)
 
 
 def testRunner():
@@ -495,4 +576,5 @@ def testRunner():
 	dst = ['demo','hello,word']
 	l.run(dst)
 
-testParser()
+runScript()
+
