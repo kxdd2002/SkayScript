@@ -97,7 +97,7 @@ class P(object):
 	def __add__(self,other):
 		return self.add(other)
 	def loop(self,onlyOne=False):
-		return LoopParser(self,onlyOne).setTag(self.tag)
+		return LoopParser(self,onlyOne)
 	def noCut(self):
 		if self.tag and not self.tag in noCutTreeTypes:
 			noCutTreeTypes.append(self.tag)
@@ -135,6 +135,7 @@ class LoopParser(P):
 	def __init__(self,parser,onlyOne=False):
 		self.parser = parser
 		self.onlyOne = onlyOne
+		self.tag = None
 	def parse(self,reader,rps):
 		ps = []
 		if self.tag:
@@ -169,7 +170,7 @@ def token(token):
 	return P()+LeafParser('token',token)
 def id(token=None,reserved=[]):
 	return P()+LeafParser('id',token,reserved)
-def word():
+def words():
 	return P()+LeafParser('str')
 def num():
 	return P()+LeafParser('num')
@@ -268,20 +269,37 @@ class ParserRules3(object):
 	def __init__(self,reader):
 		self.reader = reader
 		optRules = self.initOptRules()
+		reserved = self.initReserved()
 		self.exp = P('exp')
-		self.primary = P('primary') + ((token('(') + self.exp + token(')')) | num())
-		self.exp = self.exp + self.primary + opt(self.primary,optRules)
+		self.primary = P('primary') + ((token('(') + self.exp + token(')')) | num() | id(None,reserved) | words())
+		self.factor = P('factor') + (id('-')+self.primary)|self.primary
+		self.exp = self.exp + self.factor + OP(self.factor,optRules)
+		self.statement = P('statement')
+		self.block = P('block') + token('{') +self.statement.loop(True) + (  (token(';')|token('\n')) + self.statement.loop(True)  ).loop() +token('}')
+		self.simple = P('simple') + ( self.exp )
+		self.statement = self.statement + (  id('if') + self.exp + self.block + ( token('else') + self.block ).loop(True)  ) \
+										| (  id('while') + self.exp + self.block  ) \
+										| self.simple
+		self.program = P('program') + self.statement.loop(True) + ( token(';')|token('\n') )
+	def initReserved(self):
+		reserved = [ ';' , '}' , '\n' ]
+		return reserved
 	def initOptRules(self):
 		optRules = {}
-		optRules['+'] = (1,True)
-		optRules['-'] = (1,True)
-		optRules['*'] = (2,True)
-		optRules['/'] = (2,True)
-		optRules['**'] = (3,False)
+		optRules['='] = (1,False)
+		optRules['=='] = (2,True)
+		optRules['>'] = (2,True)
+		optRules['<'] = (2,True)
+		optRules['+'] = (3,True)
+		optRules['-'] = (3,True)
+		optRules['*'] = (4,True)
+		optRules['/'] = (4,True)
+		optRules['%'] = (4,True)
+		optRules['**'] = (5,False)
 		return optRules
 	def parse(self):
 		ps = []
-		self.exp.parse(self.reader,ps)
+		self.program.parse(self.reader,ps)
 		return ps
 
 #  打印抽象语法树
@@ -299,38 +317,77 @@ def showAST2(ast,lv=0):
 		else:
 			showAST2(t,lv+1)
 
+#  运行时环境对象
+class Env(object):
+	def __init__(self,name='',values={}):
+		self.v = values
+		self.outer= None
+		self.name=name
+		self.subId=0
+	def setOuter(self,outerEnv):
+		self.outer=outerEnv
+	def get(self,key):
+		env = self.where(key)
+		return self.v[key] if env==self and key in self.v else None if env==self else env.get(key)
+	def set(self,key,value):
+		env = self.where(key)
+		if env == self:
+			self.v[key] = value
+		elif env :
+			env.set(key,value)
+	def where(self,key):
+		env = self if key in self.v else self.outer.where(key) if self.outer else None
+		return env if env else self
+	def sub(name=''):
+		self.subId += 1
+		vs = {}
+		self.set('_%d_%s'%(self.subId,name),vs)
+		return Env(name,vs)
 
 #  脚本语言解释器
 class LangureRunner(object):
 	def __init__(self):
 		self.evals = {}
+		self.evals['program'] = self.programEval
 		self.evals['exp'] = self.expEval
 		self.evals['opt'] = self.optEval
 		self.evals['demo'] = self.demo
 		self.optInit()
-	def run(self,ast):
+	def run(self,ast,env=Env('runner')):
 		# print('ast:',ast)
 		k = self.evals[ast[0]]
-		return k(ast)
-	def expEval(self,ast):
+		return k(ast,env)
+	def programEval(self,ast,env):
+		ast = ast[1]
+		return self.run(ast,env)
+	def expEval(self,ast,env):
 		if len(ast) < 2:
 			print('broken program ... exp broken ...',ast)
 			return
 		left = ast[1]
 		optNum = 1
 		while len(ast)>=optNum+2 :
-			left = self.optEval(ast[optNum+1],left)
+			left = self.optEval(ast[optNum+1],left,env)
 			optNum+=1
 		return left
 	def optInit(self):
 		self.optSwitch = {
-			"+":lambda x,y:x+y,
-			"-":lambda x,y:x-y,
-			"*":lambda x,y:x*y,
-			"/":lambda x,y:x/y,
-			"**":lambda x,y:x**y,
+			"==":lambda x,y,env:x==y,
+			">":lambda x,y,env:x>y,
+			"<":lambda x,y,env:x<y,
+			"+":lambda x,y,env:x+y,
+			"-":lambda x,y,env:x-y,
+			"*":lambda x,y,env:x*y,
+			"/":lambda x,y,env:x/y,
+			"%":lambda x,y,env:x%y,
+			"**":lambda x,y,env:x**y,
 		}
-	def optEval(self,ast,left):
+		self.vSwitch = {
+			"=":lambda x,y,env:env.set(x,y),
+		}
+	def optEval(self,ast,left,env):
+		if not left :
+			return
 		if type(left)!=float and type(left)!=str and len(left) > 1:
 			left = left[1]
 		opt = ast[1][2]
@@ -342,10 +399,10 @@ class LangureRunner(object):
 		# print('pre right',right,ast[0],ast[1],len(ast))
 		nextPos = 1
 		while len(ast) >= 3+nextPos:
-			right = self.optEval(ast[2+nextPos],right)
+			right = self.optEval(ast[2+nextPos],right,env)
 			nextPos += 1
 		# print(opt,left,right)
-		r = self.optSwitch[opt](float(left),float(right))
+		r = self.optSwitch[opt](float(left),float(right),env) if opt in self.optSwitch else self.vSwitch[opt](left,right,env)
 		# print('r',r)
 		return r
 	def demo(self,h):
@@ -363,12 +420,12 @@ def lexicaltest():
 	f = 'store.st'
 	r = []
 	readLine(f,lexicalAnalysis,r)
-	r.append((-1,'EOF',''))
+	# r.append((-1,'EOF',''))
 	print(r)
 
-	# reader = LexerReader(r)
-	# gr = ParserRules(reader).parse()
-	# showAST2(gr)
+	reader = LexerReader(r)
+	gr = ParserRules(reader).parse()
+	showAST2(gr)
 	
 	# print(reader.read())
 
@@ -376,16 +433,19 @@ def lexicaltest():
 def testParser():
 	# t = '3+5*(4+3)*2/3' # 26.333333333333332
 	# t = '123+234*(234-23423)*7/2' # -18991668.0
-	t = '2*2**3**2+1' # 1025.0
+	t = 'a = 2*2**3**2+1' # 1025.0
+	# t = 'sum = 0\ni = 0\n'
 	# t = '(111)'
 	# t = '1+1'
 	lr = lexicalAnalysis(1,t)
 	print(lr)
 	r = LexerReader(lr)
-	gr = ParserRules2(r).parse()
+	gr = ParserRules3(r).parse()
 	showAST2(gr)
-	r = LangureRunner().run(gr)
+	env = Env('runner')
+	r = LangureRunner().run(gr,env)
 	print('>>>',r)
+	print('>>>env:',env.v)
 
 def testRunner():
 	l = LangureRunner()
