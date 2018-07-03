@@ -43,6 +43,8 @@ class LexerReader(object):
 		self.lexer = lexer
 		self.cur = 0
 		self.pre = 0
+		self.lineBegin=0
+		self.nowLine=0
 		self.len = len(lexer)
 	def read(self):
 		if self.cur >= self.len:
@@ -58,6 +60,17 @@ class LexerReader(object):
 		k = self.lexer[self.cur+step+self.pre]
 		# print('seed',k,self.cur,self.pre,step)
 		return k
+	def line(self):
+		return self.seed()[0]
+	def lpos(self):
+		if self.nowLine!=self.line():
+			self.lineBegin=self.cur+self.pre -self.lineBegin
+			self.nowLine=self.line()
+		return self.cur+self.pre -self.lineBegin
+	def pos(self):
+		return self.cur,self.pre
+	def isEnd(self):
+		return self.seed()[1]=='EOF' if self.seed() else True
 	def nextSeed(self):
 		self.pre += 1
 	def r(self,p=False):
@@ -67,7 +80,8 @@ class LexerReader(object):
 
 # 非裁剪语法树分支名集合(全局)
 noCutTreeTypes = []
-
+# 是否显示分析树的合并日志
+showAddTreeLog = True
 # 语法分析工具
 class P(object):
 	def __init__(self,tag=None):
@@ -78,8 +92,9 @@ class P(object):
 		if self.tag:
 			ps.append(self.tag)
 		for p in self.args:
+			print('next Parse ...',p,self.tag)
 			p.parse(reader,ps)
-		self.addTree(rps,ps)
+		self.addTree(rps,ps,reader)
 	def ask(self,reader):
 		p = self.args[0]
 		if p :
@@ -102,16 +117,19 @@ class P(object):
 		if self.tag and not self.tag in noCutTreeTypes:
 			noCutTreeTypes.append(self.tag)
 		return self
-	def addTree(self,tree,subTree):
+	def addTree(self,tree,subTree,reader):
+		s = reader.seed()
 		if (self.tag or (subTree and len(subTree)>1 and type(subTree[0])==str)) and tree:
-			# print('>',self.tag,type(self),tree,'||',subTree)
+			if showAddTreeLog:
+				print('<',reader.pos()[0],s,self.tag,type(self),tree,'||',subTree)
 			if subTree[0] in noCutTreeTypes:
 				tree.append(subTree)
 			else:
 				tree.append(subTree if len(subTree)>2 else subTree[1] if len(subTree)==2 else None)
 			# tree.append(subTree)
 		else:
-			# print('+',self.tag,type(self),tree,'||',subTree,'???')
+			if showAddTreeLog:
+				print('+',reader.pos()[0],s,self.tag,type(self),tree,'||',subTree,'???')
 			tree += subTree
 class WhichParser(P):
 	def __init__(self):
@@ -125,8 +143,10 @@ class WhichParser(P):
 		if p:
 			p.parse(reader,ps)
 		else:
-			raise ValueError('Parser for %s error ! in line: %d' % (self.tag,reader.seed(0)[0]))
-		self.addTree(rps,ps)
+			print('pos:',reader.pos())
+			print('nextChar:',reader.seed())
+			raise ValueError('Parser for %s error ! in line: %d' % (self.tag, reader.line() ))
+		self.addTree(rps,ps,reader)
 	def ask(self,reader):
 		for p in self.args :
 			if p.ask(reader):
@@ -144,11 +164,11 @@ class LoopParser(P):
 			self.parser.parse(reader,ps)
 			if self.onlyOne:
 				break
-		self.addTree(rps,ps)
+		self.addTree(rps,ps,reader)
 	def ask(self,reader):
-		while (self.parser.ask(reader)):
-			self.parser.nextSeed()
-		return True
+		# while (self.parser.ask(reader)):
+		# 	self.parser.nextSeed()
+		return self.parser.ask(reader)
 class LeafParser(P):
 	def __init__(self,name,token=None,reserved = []):
 		self.name = name
@@ -156,15 +176,18 @@ class LeafParser(P):
 		self.reserved = reserved
 	def parse(self,reader,ps):
 		s = reader.read()
-		if self.name!='token':
+		print(self.name,s,self.token,self.reserved)
+		if self.name!='token' and self.name!='commit' and self.name!='EOL' and self.name!='EOF'  :
 			# print((self.name,s))
 			ps.append((self.name,s[2]))
 	def ask(self,reader):
 		s = reader.seed()
+		print('->ask leaf',s,self.name,self.token,self.reserved)
 		if s:
-			if (s in self.reserved) and self.name == 'id':
+			if (s and len(s)>2 and s[2] in self.reserved) and self.name == 'id':
 				return False
-			r = s[1]==self.name if (self.name!='token' and not self.token) else self.token==s[2]
+			r = self.token==s[2] if self.token else s[1]==self.name
+			print('ask leaf',r,self.name,s,self.token,self.reserved)
 			return r
 def token(token):
 	return P()+LeafParser('token',token)
@@ -174,6 +197,10 @@ def words():
 	return P()+LeafParser('str')
 def num():
 	return P()+LeafParser('num')
+def EOL():
+	return P()+LeafParser('EOL')
+def commit():
+	return P()+LeafParser('commit')
 class OP(P):
 	def __init__(self,parser,optRules={}):
 		self.name = 'opt'
@@ -275,12 +302,13 @@ class ParserRules3(object):
 		self.factor = P('factor') + (id('-')+self.primary)|self.primary
 		self.exp = self.exp + self.factor + OP(self.factor,optRules)
 		self.statement = P('statement')
-		self.block = P('block') + token('{') +self.statement.loop(True) + (  (token(';')|token('\n')) + self.statement.loop(True)  ).loop() +token('}')
+		self.block = P('block') + id('{') +self.statement.loop(True) + (  (id(';')|id('\n')) + self.statement.loop(True)  ).loop(True) +token('}')
 		self.simple = P('simple') + ( self.exp )
 		self.statement = self.statement + (  id('if') + self.exp + self.block + ( token('else') + self.block ).loop(True)  ) \
 										| (  id('while') + self.exp + self.block  ) \
-										| self.simple
-		self.program = P('program') + self.statement.loop(True) + ( token(';')|token('\n') )
+										| (  P() + self.simple + commit().loop(True)  )
+		self.program = P('program') + self.statement.loop(True) + ( token(';')|EOL() )
+		# self.lll = P('lll') +  ( token(';')|EOL() )
 	def initReserved(self):
 		reserved = [ ';' , '}' , '\n' ]
 		return reserved
@@ -326,10 +354,10 @@ class Env(object):
 		self.subId=0
 	def setOuter(self,outerEnv):
 		self.outer=outerEnv
-	def get(self,key):
+	def get(self,key,local=False):
 		env = self.where(key)
 		return self.v[key] if env==self and key in self.v else None if env==self else env.get(key)
-	def set(self,key,value):
+	def set(self,key,value,local=False):
 		env = self.where(key)
 		if env == self:
 			self.v[key] = value
@@ -420,21 +448,17 @@ def lexicaltest():
 	f = 'store.st'
 	r = []
 	readLine(f,lexicalAnalysis,r)
-	# r.append((-1,'EOF',''))
+	r.append((-1,'EOF',''))
 	print(r)
-
-	reader = LexerReader(r)
-	gr = ParserRules(reader).parse()
-	showAST2(gr)
-	
+	# reader = LexerReader(r)
 	# print(reader.read())
 
-# 语法分析测试
+# 语法分析测试（单句脚本）
 def testParser():
 	# t = '3+5*(4+3)*2/3' # 26.333333333333332
 	# t = '123+234*(234-23423)*7/2' # -18991668.0
-	t = 'a = 2*2**3**2+1' # 1025.0
-	# t = 'sum = 0\ni = 0\n'
+	# t = 'a = 2*2**3**2+1' # 1025.0
+	t = 'if (2>1) { b = 3-2-1 }'
 	# t = '(111)'
 	# t = '1+1'
 	lr = lexicalAnalysis(1,t)
@@ -442,10 +466,29 @@ def testParser():
 	r = LexerReader(lr)
 	gr = ParserRules3(r).parse()
 	showAST2(gr)
-	env = Env('runner')
-	r = LangureRunner().run(gr,env)
-	print('>>>',r)
-	print('>>>env:',env.v)
+	# env = Env('runner')
+	# r = LangureRunner().run(gr,env)
+	# print('>>>',r)
+	# print('>>>env:',env.v)
+
+# 运行脚本测试
+def runScript(f = 'store.st'):
+	# f = 'taskcenter.lua'
+	r = []
+	readLine(f,lexicalAnalysis,r)
+	r.append((-1,'EOF',''))
+	print(r)
+	reader = LexerReader(r)
+	gr = True
+	# env = Env('global')
+	while ((not reader.isEnd()) and gr):
+		print('line: %d, pos: %d' % (reader.line(),reader.pos()))
+		gr = ParserRules3(reader).parse()
+		showAST2(gr)
+		# r = LangureRunner().run(gr,env)
+		# print('>>>',r)
+	# print('>>>env:',env.v)
+
 
 def testRunner():
 	l = LangureRunner()
