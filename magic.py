@@ -552,7 +552,7 @@ def testParser():
 	print('>>>env:',env.v)
 
 # 运行脚本测试
-def runScript(f = 'store.st'):
+def runScript(f = 'store.ss'):
 	# f = 'taskcenter.lua'
 	r = []
 	readLine(f,lexicalAnalysis,r)
