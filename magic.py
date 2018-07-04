@@ -557,7 +557,7 @@ def runScript(f = 'store.st'):
 	r = []
 	readLine(f,lexicalAnalysis,r)
 	r.append((-1,'EOF',''))
-	print(r)
+	print('LEX:',r)
 	reader = LexerReader(r)
 	gr = True
 	env = Env('global')
@@ -570,11 +570,34 @@ def runScript(f = 'store.st'):
 		print('>>>',r)
 	print('>>>env:',env.v)
 
+def runCmd():
+	env = Env('global')
+	gr = None
+	code = ''
+	while True:
+		line = 0
+		while not gr:
+			line += 1
+			print('>>>' if line==1 else '...',end=' ')
+			code += input() + ';'
+			if code == 'exit;':
+				return
+			lr = lexicalAnalysis(1,code)
+			r = LexerReader(lr)
+			g = ParserRules3(r)
+			gr = g.parse()
+		r = LangureRunner().run(gr,env)
+		# print('code',code)
+		# showAST2(gr)
+		if r:
+			print(r)
+		gr = None
+		code = ''
 
 def testRunner():
 	l = LangureRunner()
 	dst = ['demo','hello,word']
 	l.run(dst)
 
-runScript()
+runCmd()
 
