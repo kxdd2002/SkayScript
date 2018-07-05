@@ -1,4 +1,6 @@
 import os
+import sys
+import readline
 
 # 读取文件
 def readLine(fileName,handleLine,r=[],isShowLine=False):
@@ -152,8 +154,8 @@ class WhichParser(P):
 		if p:
 			p.parse(reader,ps)
 		else:
-			print('pos:',reader.pos())
-			print('nextChar:',reader.seed())
+			log('pos:',reader.pos())
+			log('nextChar:',reader.seed())
 			raise ValueError('Parser for %s error ! in line: %d' % (self.tag, reader.line() ))
 		self.addTree(rps,ps,reader)
 	def ask(self,reader):
@@ -343,7 +345,12 @@ class ParserRules3(object):
 		return optRules
 	def parse(self):
 		ps = []
-		self.program.parse(self.reader,ps)
+		self.err = None
+		try:
+			self.program.parse(self.reader,ps)
+		except BaseException as e:
+			self.err = e
+			ps = []
 		return ps
 
 #  打印抽象语法树
@@ -404,19 +411,25 @@ class Env(object):
 		self.subId += 1
 		vs = {}
 		self.set('_%d_%s'%(self.subId,name),vs)
-		return Env(name,vs)
+		subEnv = Env(name,vs)
+		return subEnv
 
 #  脚本语言解释器
 class LangureRunner(object):
 	def __init__(self):
 		self.evals = {}
-		self.evals['program'] = self.programEval
+		#语句执行
 		self.evals['exp'] = self.expEval
-		self.evals['opt'] = self.optEval
+		self.evals['simple'] = self.listEval
+		self.evals['block'] = self.listEval
 		self.evals['statement'] = self.statementEval
+		self.evals['program'] = self.listEval
+		#计算符操作
+		self.evals['opt'] = self.optEval
 		self.evals['num'] = lambda ast,env:ast[1]
 		self.evals['str'] = lambda ast,env:ast[1]
 		self.evals['id'] = self.getValue
+		#测试
 		self.evals['demo'] = self.demo
 		self.optInit()
 	def getValue(self,ast,env):
@@ -424,6 +437,14 @@ class LangureRunner(object):
 		r = env.get(ast[1])
 		# print('get ok :',ast[1],r)
 		return r
+	def exec(self,ast,env=Env('runner')):
+		r=None
+		err=None
+		try:
+			r = self.run(ast,env)
+		except BaseException as e:
+			err = e
+		return r,err
 	def run(self,ast,env=Env('runner')):
 		# print('ast:',ast)
 		# print('env:',env.v)
@@ -431,9 +452,13 @@ class LangureRunner(object):
 			return None
 		k = self.evals[ast[0]]
 		return k(ast,env)
-	def programEval(self,ast,env):
-		ast = ast[1]
-		return self.run(ast,env)
+	def listEval(self,ast,env):
+		index=1
+		r=None
+		while (index<len(ast)):
+			r = self.run(ast[index],env)
+			index += 1
+		return r
 	def statementEval(self,ast,env):
 		# print('statementEval',ast)
 		if (type(ast) not in (list,tuple)) or len(ast) <=1:
@@ -444,7 +469,7 @@ class LangureRunner(object):
 		if ast[1] and type(ast[1]) in (list,tuple) and len(ast[1]) > 0:
 			if ast[1][0] == 'id' and ast[1][1] == 'while':
 				self.whileEval(ast[2],ast[3],env)
-			elif ast[1][0] == 'id' and ast[1][1] == 'if else':
+			elif ast[1][0] == 'id' and ast[1][1] == 'if':
 				self.ifEval(ast[2],ast[3],(ast[4] if len(ast) == 5 else None),env)
 	def whileEval(self,ifExp,blocks,env):
 		ifR = self.expEval(ifExp,env)
@@ -510,6 +535,12 @@ class LangureRunner(object):
 
 ###############################################测试区#################################################
 
+# 测试解释器
+def testRunner():
+	l = LangureRunner()
+	dst = ['demo','hello,word']
+	l.run(dst)
+
 # 词法分析测试
 def lexicaltest():
 	# ts = ['"awef"','"ddsfe\"','ewfij','"eaf\\""','"ewafe\\awfeijie"','}}}}}}*&^%','32231',r'//afeieajojoiaefw']
@@ -530,8 +561,10 @@ def testParser():
 	# t = '3+5*(4+3)*2/3' # 26.333333333333332
 	# t = '123+234*(234-23423)*7/2' # -18991668.0
 	# t = 'a = 2*2**3**2+1' # 1025.0
-	# t = 'if (2>1) { b = 3-2-1 }'
-	t = 'sum = sum + i'
+	t = 'if (4>3) { b = 3-2-1 } else{c=3}'
+	# t = 'while (i<50) {i = i+1;b=i+100}'
+	# t = 'while(i<50){i=i+1}'
+	# t = 'sum = sum + i'
 	# t = '(111)'
 	# t = '1+1'
 	
@@ -547,6 +580,7 @@ def testParser():
 	env = Env('global')
 	env.set('i',3)
 	env.set('sum',0)
+	env.set('b',10)
 	r = LangureRunner().run(gr,env)
 	print('>>>',r)
 	print('>>>env:',env.v)
@@ -557,47 +591,62 @@ def runScript(f = 'store.ss'):
 	r = []
 	readLine(f,lexicalAnalysis,r)
 	r.append((-1,'EOF',''))
-	print('LEX:',r)
+	# print('LEX:',r)
 	reader = LexerReader(r)
 	gr = True
 	env = Env('global')
 	while ((not reader.isEnd()) and gr):
-		print('line: %d' % reader.line())
+		# print('line: %d' % reader.line())
 		# print('pos: %d' % reader.pos())
 		gr = ParserRules3(reader).parse()
 		showAST2(gr)
 		r = LangureRunner().run(gr,env)
+		# if r:
+		# 	print('>>>',r)
+	if r:
 		print('>>>',r)
 	print('>>>env:',env.v)
 
 def runCmd():
+	codes = []
 	env = Env('global')
 	gr = None
 	code = ''
+	print('SkayScript 0.1 ')
 	while True:
-		line = 0
 		while not gr:
-			line += 1
-			print('>>>' if line==1 else '...',end=' ')
-			code += input() + ';'
-			if code == 'exit;':
+			codes.append(input('>>>' if len(codes)==0 else '...')) 
+			if len(codes)>2 and codes[len(codes)-1] == codes[len(codes)-2] == '':
+				print('Traceback (most recent call last):')
+				print(g.err)
+				codes=[]
+				continue
+			code = ';'.join(codes)
+			if code == 'exit' or code == 'exit()':
 				return
 			lr = lexicalAnalysis(1,code)
 			r = LexerReader(lr)
 			g = ParserRules3(r)
 			gr = g.parse()
-		r = LangureRunner().run(gr,env)
 		# print('code',code)
 		# showAST2(gr)
-		if r:
+		r,err = LangureRunner().exec(gr,env)
+		if r!=None :
 			print(r)
+		elif err :
+			print('Traceback (most recent call last):')
+			print(err)
+		# print('>>>env:',env.v)
 		gr = None
-		code = ''
+		codes = []
 
-def testRunner():
-	l = LangureRunner()
-	dst = ['demo','hello,word']
-	l.run(dst)
 
-runCmd()
+
+if __name__=='__main__':
+	# testParser()
+	# runScript()
+	if len(sys.argv)>1 :
+		runScript(*sys.argv[2:])
+	else:
+		runCmd()
 
