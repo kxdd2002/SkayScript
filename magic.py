@@ -428,15 +428,10 @@ class LangureRunner(object):
 		self.evals['opt'] = self.optEval
 		self.evals['num'] = lambda ast,env:ast[1]
 		self.evals['str'] = lambda ast,env:ast[1]
-		self.evals['id'] = self.getValue
+		self.evals['id'] = lambda ast,env:env.get(ast[1])
 		#测试
 		self.evals['demo'] = self.demo
 		self.optInit()
-	def getValue(self,ast,env):
-		# print('get ',ast[1])
-		r = env.get(ast[1])
-		# print('get ok :',ast[1],r)
-		return r
 	def exec(self,ast,env=Env('runner')):
 		r=None
 		err=None
@@ -445,7 +440,7 @@ class LangureRunner(object):
 		except BaseException as e:
 			err = e
 		return r,err
-	def run(self,ast,env=Env('runner')):
+	def run(self,ast,env):
 		# print('ast:',ast)
 		# print('env:',env.v)
 		if type(ast) not in (list,tuple):
