@@ -84,7 +84,7 @@ class LexerReader(object):
 noCutTreeTypes = []
 # 是否显示分析树的合并日志
 showAddTreeLog = False
-showAskTreeLog = False
+showAskTreeLog = True
 def log(*arg):
 	if showAskTreeLog:
 		print(*arg)
@@ -223,15 +223,16 @@ class OP(P):
 		self.parser = parser
 		self.optList = optRules
 		self.tag = 'opt'
-	def parse(self,reader,ps,level=0):
+	def parse(self,reader,ps,level=0,lastLevel=0):
 		# print('in .. ',self.ask(reader))
 		# print('pos',reader.cur)
 		while (self.ask(reader)):
 			optInfo = self.ask(reader)
-			if optInfo[0] < level:
+			# warning : 此处判断未考虑运算符方向。
+			if optInfo[0] < level and optInfo[0] <= lastLevel: # 跳出，归约回上级（下一个优先级低）# warning : 如果优先级处于中间层，继续向右叠加
 				break
 			# print('next .. ',ps)
-			self.doSwift(reader,ps)
+			self.doSwift(reader,ps,level) # 平级平移
 		# print('out .. ',ps)
 		# print('pos',reader.cur)
 	def askNextOpt(self,curInfo,nextInfo):
@@ -239,7 +240,7 @@ class OP(P):
 			return curInfo[0] < nextInfo[0]
 		else:
 			return curInfo[0] <= nextInfo[0]
-	def doSwift(self,reader,ps):
+	def doSwift(self,reader,ps,lastLevel):
 		optInfo = self.ask(reader)
 		s = reader.read()
 		rps = []
@@ -249,8 +250,8 @@ class OP(P):
 		nsInfo = self.ask(reader)
 		# print('doSwift',s,optInfo,reader.seed(),nsInfo,(nsInfo and self.askNextOpt(optInfo,nsInfo)))
 		# print('pos',reader.cur)
-		if (nsInfo and self.askNextOpt(optInfo,nsInfo)):
-			self.parse(reader,rps,nsInfo[0])
+		if (nsInfo and self.askNextOpt(optInfo,nsInfo)): # 进入下级（下一个优先级高）
+			self.parse(reader,rps,nsInfo[0],lastLevel)
 		ps.append(rps)
 	def ask(self,reader):
 		s = reader.seed()
@@ -268,7 +269,7 @@ class ParserRules(object):
 		self.reader = reader
 		self.exp = P('exp')
 		self.primary = P('primary') + (token('(') + self.exp + token(')')) | num()
-		self.involution = P('mul') + self.primary + ( id('**') + self.primary ).loop()
+		self.involution = P('involution') + self.primary + ( id('**') + self.primary ).loop()
 		self.mul = P('mul') + self.involution + ( (id('*')|id('/')) + self.involution ).loop()
 		self.exp = self.exp + self.mul + ((id('+') | id('-')) + self.mul ).loop()
 	def parse(self):
@@ -346,11 +347,11 @@ class ParserRules3(object):
 	def parse(self):
 		ps = []
 		self.err = None
-		try:
-			self.program.parse(self.reader,ps)
-		except BaseException as e:
-			self.err = e
-			ps = []
+		# try:
+		self.program.parse(self.reader,ps)
+		# except BaseException as e:
+		# 	self.err = e
+		# 	ps = []
 		return ps
 
 #  打印抽象语法树
@@ -521,9 +522,9 @@ class LangureRunner(object):
 			right = self.optEval(ast[2+nextPos],right,env)
 			nextPos += 1
 			# print('next right',right)
-		# print(opt,left,right)
+		print(opt,left,right)
 		r = self.optSwitch[opt](float(left),float(right),env) if opt in self.optSwitch else self.vSwitch[opt](left,right,env)
-		# print('r',r)
+		print('r',r)
 		return r
 	def demo(self,h):
 		print(h)
@@ -556,12 +557,14 @@ def testParser():
 	# t = '3+5*(4+3)*2/3' # 26.333333333333332
 	# t = '123+234*(234-23423)*7/2' # -18991668.0
 	# t = 'a = 2*2**3**2+1' # 1025.0
-	t = 'if (4>3) { b = 3-2-1 } else{c=3}'
+	# t = 'if (4>3) { b = 3-2-1 } else{c=3}'
 	# t = 'while (i<50) {i = i+1;b=i+100}'
 	# t = 'while(i<50){i=i+1}'
 	# t = 'sum = sum + i'
 	# t = '(111)'
 	# t = '1+1'
+	# t = 'h = hh * 3+hh'
+	t = '1+3**2*5'
 	
 	lr = lexicalAnalysis(1,t)
 	print(lr)
@@ -573,9 +576,10 @@ def testParser():
 	# showRule(g.block)
 
 	env = Env('global')
-	env.set('i',3)
-	env.set('sum',0)
-	env.set('b',10)
+	# env.set('i',3)
+	# env.set('sum',0)
+	# env.set('b',10)
+	env.set('hh',22)
 	r = LangureRunner().run(gr,env)
 	print('>>>',r)
 	print('>>>env:',env.v)
@@ -620,11 +624,11 @@ def runCmd():
 			if code == 'exit' or code == 'exit()':
 				return
 			lr = lexicalAnalysis(1,code)
-			r = LexerReader(lr)
-			g = ParserRules3(r)
+			reader = LexerReader(lr)
+			g = ParserRules3(reader)
 			gr = g.parse()
-		# print('code',code)
-		# showAST2(gr)
+		# print('code:',code)
+		showAST2(gr)
 		r,err = LangureRunner().exec(gr,env)
 		if r!=None :
 			print(r)
