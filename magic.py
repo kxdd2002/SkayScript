@@ -84,7 +84,7 @@ class LexerReader(object):
 noCutTreeTypes = []
 # 是否显示分析树的合并日志
 showAddTreeLog = False
-showAskTreeLog = True
+showAskTreeLog = False
 def log(*arg):
 	if showAskTreeLog:
 		print(*arg)
@@ -522,9 +522,9 @@ class LangureRunner(object):
 			right = self.optEval(ast[2+nextPos],right,env)
 			nextPos += 1
 			# print('next right',right)
-		print(opt,left,right)
+		# print(opt,left,right)
 		r = self.optSwitch[opt](float(left),float(right),env) if opt in self.optSwitch else self.vSwitch[opt](left,right,env)
-		print('r',r)
+		# print('r',r)
 		return r
 	def demo(self,h):
 		print(h)
@@ -628,7 +628,7 @@ def runCmd():
 			g = ParserRules3(reader)
 			gr = g.parse()
 		# print('code:',code)
-		showAST2(gr)
+		# showAST2(gr)
 		r,err = LangureRunner().exec(gr,env)
 		if r!=None :
 			print(r)
