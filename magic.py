@@ -123,6 +123,8 @@ class P(object):
 		return self.add(other)
 	def loop(self,onlyOne=False):
 		return LoopParser(self,onlyOne)
+	def clear(self):
+		self.args.clear()
 	def noCut(self):
 		if self.tag and not self.tag in noCutTreeTypes:
 			noCutTreeTypes.append(self.tag)
@@ -223,18 +225,14 @@ class OP(P):
 		self.parser = parser
 		self.optList = optRules
 		self.tag = 'opt'
-	def parse(self,reader,ps,level=0,lastLevel=0):
+	def parse(self,reader,ps):
 		# print('in .. ',self.ask(reader))
 		# print('pos',reader.cur)
-		while (self.ask(reader)):
-			optInfo = self.ask(reader)
-			# warning : 此处判断未考虑运算符方向。
-			# print('opt if out ...',optInfo,level,lastLevel)
-			if optInfo[0] < level and optInfo[0] <= lastLevel: # 跳出，归约回上级（下一个优先级低）# warning : 如果优先级处于中间层，继续向右叠加
-				break
-			level = optInfo[0]
+		optInfo = self.ask(reader)
+		while (optInfo) :
 			# print('next .. ',ps)
-			self.doSwift(reader,ps,level) # 平级平移
+			self.doSwift(reader,ps,optInfo[0]) # 平级平移
+			optInfo = self.ask(reader)
 		# print('out .. ',ps)
 		# print('pos',reader.cur)
 	def askNextOpt(self,curInfo,nextInfo):
@@ -242,7 +240,7 @@ class OP(P):
 			return curInfo[0] < nextInfo[0]
 		else:
 			return curInfo[0] <= nextInfo[0]
-	def doSwift(self,reader,ps,lastLevel):
+	def doSwift(self,reader,ps,level):
 		optInfo = self.ask(reader)
 		s = reader.read()
 		rps = []
@@ -250,10 +248,13 @@ class OP(P):
 		rps.append(s)
 		self.parser.parse(reader,rps)
 		nsInfo = self.ask(reader)
-		# print('doSwift',s,optInfo,reader.seed(),nsInfo,(nsInfo and self.askNextOpt(optInfo,nsInfo)))
+		# print('doSwift in :',s,optInfo,reader.seed(),nsInfo,(nsInfo and self.askNextOpt(optInfo,nsInfo)))
 		# print('pos',reader.cur)
-		if (nsInfo and self.askNextOpt(optInfo,nsInfo)): # 进入下级（下一个优先级高）
-			self.parse(reader,rps,nsInfo[0],lastLevel)
+		# print('doSwift in info :', optInfo, nsInfo)
+		while (nsInfo and self.askNextOpt(optInfo,nsInfo)): # 进入下级（下一个优先级高）
+			# print('doSwift next :', optInfo, nsInfo)
+			self.doSwift(reader,rps,nsInfo[0])
+			nsInfo = self.ask(reader)
 		ps.append(rps)
 	def ask(self,reader):
 		s = reader.seed()
@@ -317,10 +318,12 @@ class ParserRules3(object):
 		self.reader = reader
 		optRules = self.initOptRules()
 		reserved = self.initReserved()
+
 		self.exp = P('exp')
 		self.primary = P('primary') + ((token('(') + self.exp + token(')')) | num() | id(None,reserved) | words())
 		self.factor = P('factor') + (id('-')+self.primary)|self.primary
 		self.exp = self.exp + self.factor + OP(self.factor,optRules)
+
 		self.statement = P('statement')
 		self.block = P('block') + token('{') +self.statement.loop(True) + ( P()+ ( token(';')|EOL() )  + self.statement.loop(True)   ).loop()  +token('}')
 		self.simple = P('simple') + ( self.exp )
@@ -429,8 +432,8 @@ class LangureRunner(object):
 		self.evals['program'] = self.listEval
 		#计算符操作
 		self.evals['opt'] = self.optEval
-		self.evals['num'] = lambda ast,env:ast[1]
-		self.evals['str'] = lambda ast,env:ast[1]
+		self.evals['num'] = lambda ast,env:int(ast[1])
+		self.evals['str'] = lambda ast,env:str(ast[1])
 		self.evals['id'] = lambda ast,env:env.get(ast[1])
 		#测试
 		self.evals['demo'] = self.demo
@@ -502,8 +505,6 @@ class LangureRunner(object):
 			"/":lambda x,y,env:x/y,
 			"%":lambda x,y,env:x%y,
 			"**":lambda x,y,env:x**y,
-		}
-		self.vSwitch = {
 			"=":lambda x,y,env:env.set(x,y),
 		}
 	def optEval(self,ast,left,env):
@@ -513,7 +514,7 @@ class LangureRunner(object):
 			return
 		opt = ast[1][2]
 		if type(left)!=float and type(left)!=str and type(left)!=int and len(left) > 1:
-			left = left[1] if left[0] != 'id' or opt=='=' else self.run(left,env)
+			left = left[1] if opt=='=' else self.run(left,env)
 		# right = ast[2]
 		# print('get right',ast[2])
 		right = self.run(ast[2],env)
@@ -525,7 +526,7 @@ class LangureRunner(object):
 			nextPos += 1
 			# print('next right',right)
 		# print(opt,left,right)
-		r = self.optSwitch[opt](float(left),float(right),env) if opt in self.optSwitch else self.vSwitch[opt](left,right,env)
+		r = self.optSwitch[opt](left,right,env)
 		# print('r',r)
 		return r
 	def demo(self,h):
@@ -609,6 +610,7 @@ def runScript(f = 'store.ss'):
 		print('>>>',r)
 	print('>>>env:',env.v)
 
+# 运行交互式环境
 def runCmd():
 	codes = []
 	env = Env('global')
@@ -631,7 +633,7 @@ def runCmd():
 			g = ParserRules3(reader)
 			gr = g.parse()
 		# print('code:',code)
-		showAST2(gr)
+		# showAST2(gr)
 		r,err = LangureRunner().exec(gr,env)
 		if r!=None :
 			print(r)
