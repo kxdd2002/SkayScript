@@ -229,8 +229,10 @@ class OP(P):
 		while (self.ask(reader)):
 			optInfo = self.ask(reader)
 			# warning : 此处判断未考虑运算符方向。
+			# print('opt if out ...',optInfo,level,lastLevel)
 			if optInfo[0] < level and optInfo[0] <= lastLevel: # 跳出，归约回上级（下一个优先级低）# warning : 如果优先级处于中间层，继续向右叠加
 				break
+			level = optInfo[0]
 			# print('next .. ',ps)
 			self.doSwift(reader,ps,level) # 平级平移
 		# print('out .. ',ps)
@@ -564,7 +566,8 @@ def testParser():
 	# t = '(111)'
 	# t = '1+1'
 	# t = 'h = hh * 3+hh'
-	t = '1+3**2*5'
+	t = '1+3**2*5' # 46
+	# t = '5*3**2+1' # 46
 	
 	lr = lexicalAnalysis(1,t)
 	print(lr)
@@ -628,7 +631,7 @@ def runCmd():
 			g = ParserRules3(reader)
 			gr = g.parse()
 		# print('code:',code)
-		# showAST2(gr)
+		showAST2(gr)
 		r,err = LangureRunner().exec(gr,env)
 		if r!=None :
 			print(r)
