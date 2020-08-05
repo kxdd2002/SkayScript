@@ -1,0 +1,2 @@
+# SkayScript
+python magic.py
