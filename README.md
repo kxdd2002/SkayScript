@@ -1,3 +1,3 @@
 # SkayScript
-# pip install pyreadline
+pre run >> pip install pyreadline
 python magic.py store.ss
