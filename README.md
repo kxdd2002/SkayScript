@@ -1,2 +1,2 @@
 # SkayScript
-python magic.py
+python magic.py store.ss
